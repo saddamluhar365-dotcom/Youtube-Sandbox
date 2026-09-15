@@ -26,7 +26,7 @@ class FFmpeg:
 
     def normalize_clip(self, source: Path, output: Path) -> Path:
         output.parent.mkdir(parents=True, exist_ok=True)
-        args = [self.ffmpeg, "-y", "-i", str(source), "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30", "-t", "10", "-an", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", str(output)]
+        args = [self.ffmpeg, "-y", "-i", str(source), "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30", "-t", "10", "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", str(output)]
         result = self._run(args)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg clip normalization failed: {result.stderr[-500:]}")
@@ -38,18 +38,18 @@ class FFmpeg:
         output.parent.mkdir(parents=True, exist_ok=True)
         list_file = output.with_suffix(".txt")
         list_file.write_text("\n".join(f"file '{p.resolve().as_posix().replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}'" for p in clips), encoding="utf-8")
-        args = [self.ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(output)]
+        args = [self.ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", "-movflags", "+faststart", str(output)]
         result = self._run(args)
         list_file.unlink(missing_ok=True)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg concat failed: {result.stderr[-500:]}")
         return output
 
-    def mix_audio(self, video: Path, audio: Path, output: Path) -> Path:
-        args = [self.ffmpeg, "-y", "-i", str(video), "-i", str(audio), "-filter_complex", "[1:a]volume=0.28[a]", "-map", "0:v:0", "-map", "[a]", "-t", "90", "-c:v", "copy", "-c:a", "aac", "-shortest", str(output)]
+    def mix_audio(self, video: Path, music: Path, output: Path) -> Path:
+        args = [self.ffmpeg, "-y", "-i", str(video), "-i", str(music), "-filter_complex", "[0:a]volume=0.85[va];[1:a]volume=0.15[ma];[va][ma]amix=inputs=2:duration=first:dropout_transition=2[a]", "-map", "0:v:0", "-map", "[a]", "-t", "90", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(output)]
         result = self._run(args)
         if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg audio mux failed: {result.stderr[-500:]}")
+            raise RuntimeError(f"ffmpeg audio mix failed: {result.stderr[-500:]}")
         return output
 
 
