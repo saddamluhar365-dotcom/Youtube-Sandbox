@@ -51,7 +51,14 @@ class FalVideoClient:
     def submit(self, prompt: str, aspect_ratio: str = "9:16") -> str:
         key = self.pool.next_available()
         url = f"https://queue.fal.run/{self.settings.fal_model}"
-        payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "duration": 10}
+        audio_prompt = " No dialogue, no narration, no spoken words. Natural village and cooking ASMR, gentle environmental sounds and soft background music only."
+        payload = {
+            "prompt": (prompt + audio_prompt)[:2000],
+            "aspect_ratio": aspect_ratio,
+            "duration": 10,
+            "resolution": "720p",
+            "audio": True,
+        }
         try:
             response = httpx.post(url, headers=self._headers(key), json=payload, timeout=60)
             if response.status_code in (401, 403):
@@ -85,8 +92,7 @@ class FalVideoClient:
                 result = httpx.get(f"{base}", headers={"Authorization": f"Key {key}"}, timeout=30)
                 result.raise_for_status()
                 data = result.json()
-                url = self._find_video_url(data)
-                return ProviderVideoResult(url=url, raw=data)
+                return ProviderVideoResult(url=self._find_video_url(data), raw=data)
             if status in {"FAILED", "CANCELLED"}:
                 raise RuntimeError(f"fal.ai generation {status.lower()}")
             time.sleep(self.settings.fal_poll_seconds)
