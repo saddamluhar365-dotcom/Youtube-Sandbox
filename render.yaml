@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: youtube-sandbox
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATA_DIR
+        value: /app/jobs
+      - key: FAL_VIDEO_MODEL
+        value: fal-ai/vidu/q3/text-to-video
+      - key: FAL_KEY_1
+        sync: false
+      - key: FAL_KEY_2
+        sync: false
+      - key: FAL_KEY_3
+        sync: false
+      - key: FAL_KEY_4
+        sync: false
+      - key: FAL_KEY_5
+        sync: false
+      - key: FAL_KEY_6
+        sync: false
+      - key: FAL_KEY_7
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ENABLE_REAL_PROVIDER_TESTS
+        value: "false"
