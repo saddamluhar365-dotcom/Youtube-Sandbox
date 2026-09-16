@@ -43,6 +43,14 @@ class CredentialPool:
                     return CredentialLease(self.provider, slot.slot_id, self._secrets[slot.slot_id])
             raise RuntimeError(f"All credentials temporarily quarantined for provider {self.provider.value}")
 
+    def acquire_slot(self, slot_id: str) -> CredentialLease:
+        with self._lock:
+            if slot_id not in self._secrets:
+                raise KeyError(f"unknown credential slot: {slot_id}")
+            if self._health[slot_id].quarantined_until > time.monotonic():
+                raise RuntimeError(f"credential slot {slot_id} is temporarily quarantined")
+            return CredentialLease(self.provider, slot_id, self._secrets[slot_id])
+
     def report_success(self, slot_id: str) -> None:
         with self._lock:
             health = self._health.get(slot_id)
