@@ -5,8 +5,34 @@ from app.intelligence.db import Database
 from app.intelligence.recipe_master import RecipeMaster
 
 
+def _seed_video(db: Database, video_id: str) -> None:
+    db.initialize()
+    with db.connection() as conn:
+        conn.execute(
+            """INSERT INTO channel_profiles
+               (channel_id, channel_handle, channel_url, title, description, data_hash,
+                first_seen_at, last_seen_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("UCtestchannel000000000000", "@test", "https://youtube.com/@test",
+             "Test Channel", "", "hash", "2026-01-01T00:00:00+00:00",
+             "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            """INSERT INTO channel_videos
+               (video_id, channel_id, title, description, published_at, duration_seconds,
+                view_count, like_count, comment_count, thumbnail_url, data_hash, first_seen_at,
+                last_seen_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (video_id, "UCtestchannel000000000000", "Test Video", "",
+             "2026-01-01T00:00:00+00:00", 90, 0, 0, 0, None, "hash-video",
+             "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00",
+             "2026-01-01T00:00:00+00:00"),
+        )
+
+
 def test_indexer_registers_explicit_recipe_metadata(tmp_path: Path) -> None:
     db = Database(tmp_path / "recipes.db")
+    _seed_video(db, "video-1")
     master = RecipeMaster(db)
     indexer = RecipeIndexer(master)
 
