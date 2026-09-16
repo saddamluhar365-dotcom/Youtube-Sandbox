@@ -22,6 +22,7 @@ class CredentialPool:
         self.provider = provider
         self._slots = [slot for slot in slots if slot.configured]
         self._health = {slot.slot_id: _Health() for slot in self._slots}
+        self._secrets = {slot.slot_id: slot.secret for slot in self._slots}
         self._cursor = 0
         self._lock = Lock()
 
@@ -39,7 +40,7 @@ class CredentialPool:
                 slot = self._slots[index]
                 if self._health[slot.slot_id].quarantined_until <= now:
                     self._cursor = (index + 1) % len(self._slots)
-                    return CredentialLease(self.provider, slot.slot_id, slot.secret)
+                    return CredentialLease(self.provider, slot.slot_id, self._secrets[slot.slot_id])
             raise RuntimeError(f"All credentials temporarily quarantined for provider {self.provider.value}")
 
     def report_success(self, slot_id: str) -> None:
@@ -55,7 +56,11 @@ class CredentialPool:
             if health is None:
                 return
             health.failures += 1
-            health.last_error = reason[:500]
+            secret = self._secrets.get(slot_id)
+            safe_reason = reason
+            if secret:
+                safe_reason = safe_reason.replace(secret, "[REDACTED]")
+            health.last_error = safe_reason[:500]
             health.quarantined_until = max(health.quarantined_until, time.monotonic() + max(1, seconds))
 
     def health_snapshot(self) -> dict[str, dict[str, int | float | str | None]]:
