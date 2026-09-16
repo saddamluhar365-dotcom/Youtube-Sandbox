@@ -14,7 +14,13 @@ class ProviderRegistry:
             ProviderName.HUGGING_FACE: ProviderProfile(ProviderName.HUGGING_FACE, "reference_images"),
             ProviderName.FAL: ProviderProfile(ProviderName.FAL, "video_generation_media"),
         }
-        self.pools = {provider: self._build_pool(provider) for provider in self.profiles}
+        self.pools: dict[ProviderName, CredentialPool] = {}
+        for provider in self.profiles:
+            try:
+                self.pools[provider] = self._build_pool(provider)
+            except RuntimeError:
+                # Startup and /health must remain usable before local .env setup.
+                continue
 
     @staticmethod
     def _prefix(provider: ProviderName) -> str:
@@ -37,15 +43,20 @@ class ProviderRegistry:
         return self.profiles[ProviderName(name)]
 
     def pool(self, name: str | ProviderName) -> CredentialPool:
-        return self.pools[ProviderName(name)]
+        provider = ProviderName(name)
+        pool = self.pools.get(provider)
+        if pool is None:
+            raise RuntimeError(f"No configured credentials for provider {provider.value}")
+        return pool
 
     def readiness(self) -> dict[str, dict[str, object]]:
-        return {
-            provider.value: {
+        result: dict[str, dict[str, object]] = {}
+        for provider, profile in self.profiles.items():
+            pool = self.pools.get(provider)
+            result[provider.value] = {
                 "capability": profile.capability,
-                "configured_slots": pool.configured_slots,
-                "health": pool.health_snapshot(),
+                "configured_slots": pool.configured_slots if pool else (),
+                "health": pool.health_snapshot() if pool else {},
+                "ready": pool is not None,
             }
-            for provider, profile in self.profiles.items()
-            for pool in [self.pools[provider]]
-        }
+        return result
