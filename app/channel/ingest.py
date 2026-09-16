@@ -21,7 +21,7 @@ def _utcnow() -> str:
 
 
 class PublicChannelIngestor:
-    """Persist normalized public channel payloads and classify incremental changes."""
+    """Persist normalized public channel payloads with incremental snapshot reuse."""
 
     def __init__(self, db: Database):
         self.db = db
@@ -41,12 +41,20 @@ class PublicChannelIngestor:
             "videos": [self._video_dict(video) for video in videos],
         }
         channel_hash = _hash(channel_payload)
+        video_hashes = {video.video_id: _hash(self._video_dict(video)) for video in videos}
+        now = _utcnow()
 
         with self.db.connection() as conn:
             old_channel = conn.execute(
                 "SELECT data_hash FROM channel_profiles WHERE channel_id = ?",
                 (identity.channel_id,),
             ).fetchone()
+            channel_changed = old_channel is None or old_channel[0] != channel_hash
+
+            classifications = self._classify_videos(conn, video_hashes)
+            has_video_changes = bool(classifications[0] or classifications[1])
+            snapshot_needed = channel_changed or has_video_changes
+
             conn.execute(
                 """
                 INSERT INTO channel_profiles
@@ -74,43 +82,40 @@ class PublicChannelIngestor:
                     channel_payload["country"],
                     channel_payload["custom_url"],
                     channel_payload["published_at"],
-                    _utcnow(),
-                    _utcnow(),
+                    now,
+                    now,
                     channel_hash,
                 ),
             )
 
-            existing_snapshot = conn.execute(
-                "SELECT MAX(snapshot_version) FROM channel_snapshots WHERE channel_id = ?",
-                (identity.channel_id,),
-            ).fetchone()[0]
-            snapshot_version = int(existing_snapshot or 0) + 1
-            snapshot_id = str(uuid.uuid4())
-            conn.execute(
+            latest_snapshot = conn.execute(
                 """
-                INSERT INTO channel_snapshots
-                (snapshot_id, channel_id, snapshot_version, data_hash, video_count)
-                VALUES (?, ?, ?, ?, ?)
+                SELECT snapshot_id, snapshot_version
+                FROM channel_snapshots
+                WHERE channel_id = ?
+                ORDER BY snapshot_version DESC
+                LIMIT 1
                 """,
-                (snapshot_id, identity.channel_id, snapshot_version, channel_hash, len(videos)),
-            )
+                (identity.channel_id,),
+            ).fetchone()
 
-            new_ids: list[str] = []
-            changed_ids: list[str] = []
-            unchanged_ids: list[str] = []
+            if snapshot_needed or latest_snapshot is None:
+                snapshot_version = int(latest_snapshot[1] if latest_snapshot else 0) + 1
+                snapshot_id = str(uuid.uuid4())
+                conn.execute(
+                    """
+                    INSERT INTO channel_snapshots
+                    (snapshot_id, channel_id, snapshot_version, data_hash, video_count)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (snapshot_id, identity.channel_id, snapshot_version, channel_hash, len(videos)),
+                )
+            else:
+                snapshot_id = str(latest_snapshot[0])
+                snapshot_version = int(latest_snapshot[1])
+
+            new_ids, changed_ids, unchanged_ids = classifications
             for video in videos:
-                data_hash = _hash(self._video_dict(video))
-                old_video = conn.execute(
-                    "SELECT data_hash FROM channel_videos WHERE video_id = ?",
-                    (video.video_id,),
-                ).fetchone()
-                if old_video is None:
-                    new_ids.append(video.video_id)
-                elif old_video[0] == data_hash:
-                    unchanged_ids.append(video.video_id)
-                else:
-                    changed_ids.append(video.video_id)
-
                 conn.execute(
                     """
                     INSERT INTO channel_videos
@@ -145,8 +150,8 @@ class PublicChannelIngestor:
                         video.like_count,
                         video.comment_count,
                         video.thumbnail_url,
-                        data_hash,
-                        _utcnow(),
+                        video_hashes[video.video_id],
+                        now,
                     ),
                 )
 
@@ -167,10 +172,30 @@ class PublicChannelIngestor:
             unchanged_video_ids=tuple(unchanged_ids),
             private_analytics_available=False,
             metadata={
-                "channel_changed": old_channel is None or old_channel[0] != channel_hash,
+                "channel_changed": channel_changed,
+                "snapshot_created": snapshot_needed or latest_snapshot is None,
+                "incremental_noop": not (snapshot_needed or latest_snapshot is None),
                 "public_only": True,
             },
         )
+
+    @staticmethod
+    def _classify_videos(conn: Any, video_hashes: dict[str, str]) -> tuple[list[str], list[str], list[str]]:
+        new_ids: list[str] = []
+        changed_ids: list[str] = []
+        unchanged_ids: list[str] = []
+        for video_id, data_hash in video_hashes.items():
+            old_video = conn.execute(
+                "SELECT data_hash FROM channel_videos WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            if old_video is None:
+                new_ids.append(video_id)
+            elif old_video[0] == data_hash:
+                unchanged_ids.append(video_id)
+            else:
+                changed_ids.append(video_id)
+        return new_ids, changed_ids, unchanged_ids
 
     @staticmethod
     def _video(item: dict[str, Any]) -> PublicVideo:
