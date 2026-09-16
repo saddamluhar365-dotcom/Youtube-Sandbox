@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -15,7 +15,7 @@ class ProviderName(str, Enum):
 class CredentialSlot:
     provider: ProviderName
     slot_id: str
-    secret: str
+    secret: str = field(repr=False)
 
     @property
     def configured(self) -> bool:
@@ -26,7 +26,7 @@ class CredentialSlot:
 class CredentialLease:
     provider: ProviderName
     slot_id: str
-    secret: str
+    secret: str = field(repr=False)
 
     def redacted(self) -> str:
         return f"{self.provider.value}:{self.slot_id}"
