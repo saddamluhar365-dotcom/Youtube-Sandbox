@@ -1,58 +1,59 @@
-# YouTube Sandbox — Phase 1
+# YouTube Sandbox — Master Agent
 
-Render-deployable sandbox for generating **Ghibli-inspired 2D village ASMR recipe Shorts**.
+Production-oriented, local-first YouTube Shorts intelligence and generation agent for **90-second vertical Shorts built from exactly 9 × 10-second clips**.
 
-## Phase-1 scope
+## Agent architecture
 
-`Topic → Gemini scene plan → 9 × 10s fal.ai clips → dialogue-free audio → FFmpeg → validation → MP4`
+1. **Level 1 — YouTube Knowledge Base**: evidence-aware storage for official facts, observed channel data, external evidence and hypotheses. Evidence classes are never silently mixed.
+2. **Level 2 — Channel Intelligence**: handle → channel ID resolution, public channel/video ingestion, incremental snapshots, recipe master, semantic no-repeat gate, comparable competitor discovery and public-data gap analysis.
+3. **Level 3 — Creative Director**: recipe decision, world bible, story blueprint and validated 9-scene production blueprint.
+4. **Generation pipeline**: 9 × 10-second video generation, audio, FFmpeg assembly and final media validation.
+5. **Provider security**: isolated seven-slot pools for fal.ai, Gemini, Tavily and Hugging Face with round-robin acquisition, temporary quarantine and redacted health state.
 
-- Exactly 9 clips × 10 seconds.
-- Vertical 1080×1920 output.
-- No dialogue and no narration.
-- Ambient/cooking ASMR + soft background music layer.
-- fal.ai credentials are read only from Render environment variables.
-- Up to 7 configured fal.ai credentials are supported by the key pool.
-- YouTube OAuth/upload/publishing is intentionally **not included**.
+## Locked production rules
 
-## API
+- Exactly 9 clips × 10 seconds = 90 seconds.
+- Every clip is a connected 3–5 beat mini-sequence; static single-action clips are rejected by the blueprint validator.
+- Ambient/cozy village visuals and story/food transformation are both represented in the blueprint.
+- No dialogue, narration or text overlays in the generated production prompts.
+- Recipe Master blocks exact and semantic duplicates, including alias/ingredient/method/story overlap.
+- YouTube OAuth/upload/publishing remains disabled until explicitly added.
 
-- `GET /health`
-- `POST /api/v1/jobs` with `{ "topic": "..." }`
-- `GET /api/v1/jobs/{job_id}`
-- `GET /api/v1/jobs/{job_id}/output`
-- `POST /api/v1/jobs/{job_id}/cancel`
+## Data and security
 
-Example:
+- SQLite is the local intelligence database; secrets are never stored there.
+- Provider credentials are read from environment variables only: `FAL_KEY_1..7`, `GEMINI_KEY_1..7`, `TAVILY_KEY_1..7`, `HF_TOKEN_1..7`.
+- `.env.example` contains names only; never commit real keys.
+- CI runs tests, Python compilation and the repository secret scanner.
+- Provider errors exposed to health state are redacted against the originating credential.
+- Public YouTube sync is public-data only. Private YouTube Analytics requires authenticated YouTube/Analytics access and is not fabricated by this system.
 
-```bash
-curl -X POST https://YOUR-RENDER-SERVICE.onrender.com/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"topic":"Traditional village tomato chutney"}'
-```
+## Local PC setup
 
-Then poll the returned job ID until `state` becomes `completed` and open the output endpoint.
-
-## Render setup
-
-Deploy this repository as a Docker web service. Render reads `render.yaml` and the Docker image installs FFmpeg/ffprobe.
-
-Set the following secrets in Render:
-
-- `FAL_KEY_1` … `FAL_KEY_7`
-- `GEMINI_API_KEY` (optional; fallback scene planner works without it)
-
-Do **not** put keys in GitHub, request JSON, logs, or job records.
-
-## Important audio note
-
-Phase-1 has a deterministic dialogue-free audio fallback so the assembly pipeline can be tested without another credential. A real ASMR/audio provider can be plugged into the audio interface later without changing the video/job API.
-
-## Local test
-
-```bash
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install .
+Copy-Item .env.example .env
 pytest -q
+python -m compileall app
+python scripts/security_scan.py
 uvicorn app.main:app --host 0.0.0.0 --port 10000
 ```
 
-A real fal.ai smoke test should be run only after the service health check succeeds and the provider/model configured in `FAL_VIDEO_MODEL` is confirmed to accept the payload shape used by the deployment.
+Set the real provider keys in the local environment before using external generation/research providers. Do not put them in source files, JSON requests, SQLite, GitHub or logs.
+
+## API
+
+- `GET /health` — service, provider readiness and intelligence schema state.
+- `POST /api/v1/channels/sync` — resolve a channel handle and perform public incremental ingestion + analysis.
+- `GET /api/v1/channels/{handle}` — return the latest persisted public analysis.
+- `POST /api/v1/creative/blueprints` — validate and build a 9-scene production blueprint.
+- `POST /api/v1/jobs` — run the generation pipeline after a topic is supplied.
+- `GET /api/v1/jobs/{job_id}` — job status.
+- `GET /api/v1/jobs/{job_id}/output` — validated MP4.
+- `POST /api/v1/jobs/{job_id}/cancel` — safe cancellation before generation starts.
+
+## Verification gate
+
+The branch is not considered release-ready until GitHub Actions is **GREEN** for the exact branch head. Real provider smoke tests should only be enabled intentionally after local configuration; CI does not consume production credentials.
