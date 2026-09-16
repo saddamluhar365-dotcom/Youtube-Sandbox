@@ -56,5 +56,4 @@ class SecretScanner:
             or stripped.endswith("=\"\"")
             or stripped.endswith("=''")
             or "YOUR_" in stripped
-            or "example" in stripped.lower()
         )
