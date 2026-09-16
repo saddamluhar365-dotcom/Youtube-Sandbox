@@ -7,7 +7,7 @@ from app.security.secrets import SecretScanner
 
 def test_scanner_flags_common_secret_assignments(tmp_path: Path) -> None:
     target = tmp_path / "bad.py"
-    target.write_text('FAL_KEY_1 = "real-secret-value-123456"\n', encoding="utf-8")
+    target.write_text('FAL_KEY_1 = "test-example-secret-123456"\n', encoding="utf-8")
     findings = SecretScanner().scan_paths((target,))
     assert findings
     assert findings[0].path == str(target)
