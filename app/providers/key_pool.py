@@ -21,6 +21,8 @@ class CredentialPool:
     def __init__(self, provider: ProviderName, slots: list[CredentialSlot]) -> None:
         self.provider = provider
         self._slots = [slot for slot in slots if slot.configured]
+        if not self._slots:
+            raise RuntimeError(f"No configured credentials for provider {provider.value}")
         self._health = {slot.slot_id: _Health() for slot in self._slots}
         self._secrets = {slot.slot_id: slot.secret for slot in self._slots}
         self._cursor = 0
@@ -32,8 +34,6 @@ class CredentialPool:
 
     def acquire(self) -> CredentialLease:
         with self._lock:
-            if not self._slots:
-                raise RuntimeError(f"No configured credentials for provider {self.provider.value}")
             now = time.monotonic()
             for offset in range(len(self._slots)):
                 index = (self._cursor + offset) % len(self._slots)
