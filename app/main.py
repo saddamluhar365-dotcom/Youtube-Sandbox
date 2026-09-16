@@ -7,16 +7,27 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .agent.master import BlueprintRequest, MasterAgent
+from .channel.ingest import PublicChannelIngestor
+from .channel.resolver import ChannelHandleResolver
+from .channel.sync import ChannelSyncService
+from .channel.youtube import YouTubePublicCollector
 from .config import Settings
 from .intelligence.db import Database
 from .intelligence.recipe_master import RecipeCandidate
 from .models import CreateJobRequest, JobResponse, JobState
 from .pipeline import Pipeline
+from .providers.registry import ProviderRegistry
 
 settings = Settings.from_env()
 pipeline = Pipeline(settings)
 intelligence_db = Database(settings.data_dir / "intelligence.sqlite3")
-master_agent = MasterAgent(db=intelligence_db)
+provider_registry = ProviderRegistry()
+channel_sync = ChannelSyncService(
+    resolver=ChannelHandleResolver(),
+    collector=YouTubePublicCollector().collect,
+    ingestor=PublicChannelIngestor(intelligence_db),
+)
+master_agent = MasterAgent(db=intelligence_db, sync_provider=channel_sync)
 
 
 class ChannelSyncRequest(BaseModel):
@@ -48,22 +59,23 @@ def _recipe_from_api(value: dict[str, Any]) -> RecipeCandidate:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="YouTube Sandbox", version="0.1.0")
+    app = FastAPI(title="YouTube Sandbox Master Agent", version="1.0.0")
 
     @app.get("/health")
     def health() -> dict:
         return {
             "status": "ok",
             "ffmpeg": settings.ffmpeg_available(),
-            "fal_keys_configured": len(settings.fal_keys),
-            "gemini_configured": bool(settings.gemini_api_key),
+            "providers": provider_registry.readiness(),
             "youtube_upload_enabled": False,
+            "public_channel_sync": True,
+            "intelligence_schema_version": intelligence_db.schema_version(),
         }
 
     @app.post("/api/v1/jobs", response_model=JobResponse, status_code=202)
     def create_job(request: CreateJobRequest, background: BackgroundTasks) -> JobResponse:
         if not settings.fal_keys:
-            raise HTTPException(status_code=503, detail="No fal.ai API keys configured in Render environment")
+            raise HTTPException(status_code=503, detail="No fal.ai API keys configured")
         if not settings.ffmpeg_available():
             raise HTTPException(status_code=503, detail="FFmpeg/ffprobe is not available")
         job = pipeline.store.create(request.topic)
@@ -76,11 +88,8 @@ def create_app() -> FastAPI:
         if not job:
             raise HTTPException(status_code=404, detail="job not found")
         return JobResponse(
-            job_id=job["id"],
-            state=job["state"],
-            progress=job["progress"],
-            error=job["error"],
-            validation=job["validation"],
+            job_id=job["id"], state=job["state"], progress=job["progress"],
+            error=job["error"], validation=job["validation"],
         )
 
     @app.get("/api/v1/jobs/{job_id}/output")
@@ -111,19 +120,14 @@ def create_app() -> FastAPI:
             analysis = master_agent.analyze_channel(request.handle)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except (TypeError, ValueError) as exc:
+        except (LookupError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
-            "channel_id": analysis.channel_id,
-            "status": analysis.status,
-            "video_count": analysis.video_count,
-            "topics": analysis.topics,
-            "pillars": analysis.pillars,
-            "hooks": analysis.hooks,
-            "formats": analysis.formats,
-            "recipes": analysis.recipes,
-            "observations": analysis.observations,
-            "hypotheses": analysis.hypotheses,
+            "channel_id": analysis.channel_id, "status": analysis.status,
+            "video_count": analysis.video_count, "topics": analysis.topics,
+            "pillars": analysis.pillars, "hooks": analysis.hooks,
+            "formats": analysis.formats, "recipes": analysis.recipes,
+            "observations": analysis.observations, "hypotheses": analysis.hypotheses,
             "private_analytics_available": analysis.private_analytics_available,
         }
 
@@ -133,16 +137,11 @@ def create_app() -> FastAPI:
         if analysis is None:
             raise HTTPException(status_code=404, detail="channel not found")
         return {
-            "channel_id": analysis.channel_id,
-            "status": analysis.status,
-            "video_count": analysis.video_count,
-            "topics": analysis.topics,
-            "pillars": analysis.pillars,
-            "hooks": analysis.hooks,
-            "formats": analysis.formats,
-            "recipes": analysis.recipes,
-            "observations": analysis.observations,
-            "hypotheses": analysis.hypotheses,
+            "channel_id": analysis.channel_id, "status": analysis.status,
+            "video_count": analysis.video_count, "topics": analysis.topics,
+            "pillars": analysis.pillars, "hooks": analysis.hooks,
+            "formats": analysis.formats, "recipes": analysis.recipes,
+            "observations": analysis.observations, "hypotheses": analysis.hypotheses,
             "private_analytics_available": analysis.private_analytics_available,
         }
 
@@ -151,24 +150,18 @@ def create_app() -> FastAPI:
         try:
             blueprint = master_agent.create_blueprint(
                 BlueprintRequest(
-                    recipe=_recipe_from_api(request.recipe),
-                    world=request.world,
-                    story=request.story,
-                    scenes=request.scenes,
+                    recipe=_recipe_from_api(request.recipe), world=request.world,
+                    story=request.story, scenes=request.scenes,
                     audio_direction=request.audio_direction,
                 )
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
-            "status": blueprint.status,
-            "duration_seconds": blueprint.duration_seconds,
-            "scene_count": blueprint.scene_count,
-            "recipe": blueprint.recipe,
-            "world": blueprint.world,
-            "story": blueprint.story,
-            "scenes": blueprint.scenes,
-            "audio_direction": blueprint.audio_direction,
+            "status": blueprint.status, "duration_seconds": blueprint.duration_seconds,
+            "scene_count": blueprint.scene_count, "recipe": blueprint.recipe,
+            "world": blueprint.world, "story": blueprint.story,
+            "scenes": blueprint.scenes, "audio_direction": blueprint.audio_direction,
             "validation_errors": blueprint.validation_errors,
         }
 
